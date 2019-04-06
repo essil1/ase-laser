@@ -6,6 +6,7 @@ from ase import units
 
 from scipy import interpolate
 import numpy as np
+import sys
 
 
 class LangevinLaser(MolecularDynamics):
@@ -67,7 +68,7 @@ class LangevinLaser(MolecularDynamics):
         self.interpolated_el_temp = interpolate.interp1d(temp_t, temp_el, kind='cubic')
         self.interpolated_ph_temp = interpolate.interp1d(temp_t, temp_ph, kind='cubic')
 
-        """ Read from density.txt into 1D arrays and generate interpolated function"""
+        """ Read from density.txt into 1D arrays, generate interpolated function, and get cutoff"""
 
         density_file = np.loadtxt(density)
 
@@ -75,6 +76,8 @@ class LangevinLaser(MolecularDynamics):
         n_array = density_file[:, 1]
 
         self.interpolated_density = interpolate.interp1d(r_array, n_array, kind='cubic')
+
+        self.cutoff = r_array[-1]
 
         """ Constant friction for surface atoms """
 
@@ -92,18 +95,28 @@ class LangevinLaser(MolecularDynamics):
 
         """ Get indices of adsorbate and surface atoms """
 
-        self.adsorbate_indices = np.empty(0)
-        self.surface_indices = np.empty(0)
+        self.C_indices = np.empty(0, dtype=int)
+        self.O_indices = np.empty(0, dtype=int)
+        self.surface_indices = np.empty(0, dtype=int)
         self.symbols = atoms.get_chemical_symbols()
 
-        index = int(0)
+        index = 0
 
         for symbol in self.symbols:
-            if symbol == 'C' or symbol == 'O':
-                self.adsorbate_indices = np.append(self.adsorbate_indices, index)
-            if symbol == 'Pd':
+            if symbol == 'C':
+                self.C_indices = np.append(self.C_indices, index)
+
+            elif symbol == 'O':
+                self.O_indices = np.append(self.O_indices, index)
+
+            elif symbol == 'Pd':
                 self.surface_indices = np.append(self.surface_indices, index)
             index += 1
+
+        """ Make empty arrays for atom temperatures and frictions """
+
+        self.T = np.zeros(natoms)
+        self.friction = np.zeros(natoms)
 
         self.fixcm = fixcm  # will the center of mass be held fixed?
         self.communicator = communicator
@@ -135,46 +148,30 @@ class LangevinLaser(MolecularDynamics):
     def calculate_friction(self, symbol, index):
 
         friction = 0.
-        cutoff = 4.059  # in angstrom
-        densities = np.empty(0)
-
-        if symbol == 'C':
-
-            distances = self.atoms.get_distances(index, self.surface_indices.astype(int))
-
-            for distance in distances:
-                if distance <= cutoff:
-                    densities = np.append(densities, self.interpolated_density(distance))
-
-            electron_density = np.sum(densities)
-
-            if electron_density > 0.:
-                rs = (3. / (4. * np.pi * electron_density)) ** (1./3.)
-                friction = 22.654 * rs ** (2.004) * np.exp(-3.134 * rs) + 2.497 * rs ** (-2.061) * np.exp(0.0793 * rs)
-
-            else:
-                friction = 0.
-
-        if symbol == 'O':
-
-            distances = self.atoms.get_distances(index, self.surface_indices.astype(int))
-
-            for distance in distances:
-                if distance <= cutoff:
-                    densities = np.append(densities, self.interpolated_density(distance))
-
-            electron_density = np.sum(densities)
-
-            if electron_density > 0.:
-                rs = (3. / (4. * np.pi * electron_density)) ** (1./3.)
-                friction = 1.36513 * rs ** (-1.8284) * np.exp(-0.0820301 * rs) + 50.342 * rs ** (0.490785) * np.exp(
-                    -2.70429 * rs)
-
-            else:
-                friction = 0.
 
         if symbol == 'Pd':
             friction = self.lattice_friction
+
+        elif symbol == 'C' or symbol == 'O':
+
+            distances = self.atoms.get_distances(index, self.surface_indices, mic=True)
+            electron_density = self.interpolated_density(distances[np.where(distances < self.cutoff)]).sum()
+
+            if electron_density > 0.:
+
+                rs = (3. / (4. * np.pi * electron_density)) ** (1./3.)
+
+                if symbol == 'C':
+                    friction = 22.654 * rs ** (2.004) * np.exp(-3.134 * rs) + 2.497 * rs ** (-2.061) * np.exp(0.0793 * rs)
+
+                elif symbol == 'O':
+                    friction = 1.36513 * rs ** (-1.8284) * np.exp(-0.0820301 * rs) + 50.342 * rs ** (0.490785) * np.exp(-2.70429 * rs)
+
+            else:
+                friction = 0.
+
+        else:
+            sys.exit('Error while calculating friction for atom no. ' + str(index) + '. Invalid chemical symbol ' + str(symbol) + '.')
 
         return friction
 
@@ -188,7 +185,6 @@ class LangevinLaser(MolecularDynamics):
         T_el = self.interpolated_el_temp(self.get_time())
         T_ph = self.interpolated_ph_temp(self.get_time())
 
-        T = 0
         index = 0
 
         for symbol in self.symbols:
