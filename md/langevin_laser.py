@@ -87,17 +87,17 @@ class LangevinLaser(MolecularDynamics):
 
         natoms = atoms.get_number_of_atoms()
 
-        self.c1 = np.empty([natoms, 3])
-        self.c2 = np.empty([natoms, 3])
-        self.c3 = np.empty([natoms, 3])
-        self.c4 = np.empty([natoms, 3])
-        self.c5 = np.empty([natoms, 3])
+        self.c1 = np.zeros([natoms])
+        self.c2 = np.zeros([natoms])
+        self.c3 = np.zeros([natoms])
+        self.c4 = np.zeros([natoms])
+        self.c5 = np.zeros([natoms])
 
         """ Get indices of adsorbate and surface atoms """
 
         self.C_indices = np.empty(0, dtype=int)
         self.O_indices = np.empty(0, dtype=int)
-        self.surface_indices = np.empty(0, dtype=int)
+        self.lattice_indices = np.empty(0, dtype=int)
         self.symbols = atoms.get_chemical_symbols()
 
         index = 0
@@ -110,13 +110,22 @@ class LangevinLaser(MolecularDynamics):
                 self.O_indices = np.append(self.O_indices, index)
 
             elif symbol == 'Pd':
-                self.surface_indices = np.append(self.surface_indices, index)
+                self.lattice_indices = np.append(self.lattice_indices, index)
             index += 1
+
+        self.adsorbate_indices = np.concatenate((self.C_indices, self.O_indices))
 
         """ Make empty arrays for atom temperatures and frictions """
 
         self.T = np.zeros(natoms)
         self.friction = np.zeros(natoms)
+
+        """ Set friction for surface atoms immediately since it is constant during the simulation """
+
+        np.put(self.friction, self.lattice_indices, lattice_friction)
+
+        """ Get atomic masses """
+        self.mass = atoms.get_masses()
 
         self.fixcm = fixcm  # will the center of mass be held fixed?
         self.communicator = communicator
@@ -154,7 +163,7 @@ class LangevinLaser(MolecularDynamics):
 
         elif symbol == 'C' or symbol == 'O':
 
-            distances = self.atoms.get_distances(index, self.surface_indices, mic=True)
+            distances = self.atoms.get_distances(index, self.lattice_indices, mic=True)
             electron_density = self.interpolated_density(distances[np.where(distances < self.cutoff)]).sum()
 
             if electron_density > 0.:
@@ -175,31 +184,57 @@ class LangevinLaser(MolecularDynamics):
 
         return friction
 
+    def calculate_friction2(self):
+
+        for index in self.adsorbate_indices:
+
+            symbol = self.symbols[index]
+
+            distances = self.atoms.get_distances(index, self.lattice_indices, mic=True)
+            electron_density = self.interpolated_density(distances[np.where(distances < self.cutoff)]).sum()
+
+            if electron_density > 0.:
+
+                rs = (3. / (4. * np.pi * electron_density)) ** (1./3.)
+
+                if symbol == 'C':
+                    self.friction[index] = 22.654 * rs ** (2.004) * np.exp(-3.134 * rs) + 2.497 * rs ** (-2.061) * np.exp(0.0793 * rs)
+
+                elif symbol == 'O':
+                    self.friction[index] = 1.36513 * rs ** (-1.8284) * np.exp(-0.0820301 * rs) + 50.342 * rs ** (0.490785) * np.exp(-2.70429 * rs)
+
+                else:
+                    sys.exit('Error while calculating friction for atom no. ' + str(index) + '. Invalid chemical symbol ' + str(symbol) + '.')
+
+            else:
+                self.friction[index] = 0.
+
     def updatevars(self):
 
         dt = self.dt
-        masses = self.masses
+        masses = self.mass
 
         """Get electronic and phonon temperatures at current time"""
 
-        T_el = self.interpolated_el_temp(self.get_time())
-        T_ph = self.interpolated_ph_temp(self.get_time())
+        current_time = self.get_time()
 
-        index = 0
+        T_el = self.interpolated_el_temp(current_time)
+        T_ph = self.interpolated_ph_temp(current_time)
 
-        for symbol in self.symbols:
-            if symbol == 'C' or symbol == 'O':
-                T = T_el
-            if (symbol == 'Pd'):
-                T = T_ph
-            fr = self.calculate_friction(symbol, index)
-            sigma = np.sqrt(2. * T * fr / masses[index])
-            self.c1[index][:] = (dt / 2. - dt * dt * fr / 8.)
-            self.c2[index][:] = (dt * fr / 2 - dt * dt * fr * fr / 8.)
-            self.c3[index][:] = (np.sqrt(dt) * sigma / 2. - dt ** 1.5 * fr * sigma / 8.)
-            self.c5[index][:] = (dt ** 1.5 * sigma / (2 * np.sqrt(3)))
-            self.c4[index][:] = (fr / 2. * self.c5[index])
-            index += 1
+        np.put(self.T, self.adsorbate_indices, T_el)
+        np.put(self.T, self.lattice_indices, T_ph)
+
+        """Calculate adsorbate friction at current time"""
+
+        self.calculate_friction2()
+        fr = self.friction
+
+        sigma = np.sqrt(2. * self.T * fr / masses)
+        self.c1 = (dt / 2. - dt * dt * fr / 8.)
+        self.c2 = (dt * fr / 2 - dt * dt * fr * fr / 8.)
+        self.c3 = (np.sqrt(dt) * sigma / 2. - dt ** 1.5 * fr * sigma / 8.)
+        self.c5 = (dt ** 1.5 * sigma / (2 * np.sqrt(3.)))
+        self.c4 = (fr / 2. * self.c5)
 
         # Works in parallel Asap, #GLOBAL number of atoms:
         self.natoms = self.atoms.get_number_of_atoms()
@@ -225,14 +260,14 @@ class LangevinLaser(MolecularDynamics):
             self.communicator.broadcast(self.eta, 0)
 
         # First halfstep in the velocity.
-        self.v += (self.c1 * f / self.masses - self.c2 * self.v + self.xi * self.c3 - self.c4 * self.eta)
+        self.v += (self.c1[:, None] * f / self.masses - self.c2[:, None] * self.v + self.xi * self.c3[:, None] - self.c4[:, None] * self.eta)
 
         # Full step in positions
         x = atoms.get_positions()
         if self.fixcm:
             old_cm = atoms.get_center_of_mass()
         # Step: x^n -> x^(n+1) - this applies constraints if any.
-        atoms.set_positions(x + self.dt * self.v + self.c5 * self.eta)
+        atoms.set_positions(x + self.dt * self.v + self.c5[:, None] * self.eta)
         if self.fixcm:
             new_cm = atoms.get_center_of_mass()
             d = old_cm - new_cm
@@ -241,12 +276,12 @@ class LangevinLaser(MolecularDynamics):
 
         # recalc velocities after RATTLE constraints are applied
         self.v = (self.atoms.get_positions() - x -
-                  self.c5 * self.eta) / self.dt
+                  self.c5[:, None] * self.eta) / self.dt
         f = atoms.get_forces(md=True)
 
         # Update the velocities
-        self.v += (self.c1 * f / self.masses - self.c2 * self.v +
-                   self.c3 * self.xi - self.c4 * self.eta)
+        self.v += (self.c1[:, None] * f / self.masses - self.c2[:, None] * self.v +
+                   self.c3[:, None] * self.xi - self.c4[:, None] * self.eta)
 
         if self.fixcm:  # subtract center of mass vel
             v_cm = self._get_com_velocity()
