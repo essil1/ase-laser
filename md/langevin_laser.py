@@ -6,7 +6,6 @@ from ase import units
 
 from scipy import interpolate
 import numpy as np
-import sys
 
 
 class LangevinLaser(MolecularDynamics):
@@ -21,13 +20,13 @@ class LangevinLaser(MolecularDynamics):
         The time step.
 
     temperature
-        Input as np.loadtxt(temperature_data)
+        String, name of file which contains time versus electronic temperatures versus phonon temperatures.
 
-    el_dens_vs_r
-        Input as np.loadtxt(density_data)
+    density
+        String, name of file which contains distance from lattice atom versus electron density.
 
     lattice_friction
-        Optional, constant friction for surface atoms
+        Optional, constant friction for lattice atoms
 
     fixcm
         If True, the position and momentum of the center of mass is
@@ -37,9 +36,6 @@ class LangevinLaser(MolecularDynamics):
         Random number generator, by default numpy.random.  Must have a
         standard_normal method matching the signature of
         numpy.random.standard_normal.
-
-    The temperature and friction are normally scalars, but in principle one
-    quantity per atom could be specified by giving an array.
 
     RATTLE constraints can be used with these propagators, see:
     E. V.-Eijnden, and G. Ciccotti, Chem. Phys. Lett. 429, 310 (2006)
@@ -79,56 +75,32 @@ class LangevinLaser(MolecularDynamics):
 
         self.cutoff = r_array[-1]
 
-        """ Constant friction for surface atoms """
-
-        self.lattice_friction = lattice_friction
-
         """Make empty arrays for the coefficients """  # find journal reference
 
-        natoms = atoms.get_number_of_atoms()
+        self.natoms = atoms.get_number_of_atoms()
 
-        self.c1 = np.zeros([natoms])
-        self.c2 = np.zeros([natoms])
-        self.c3 = np.zeros([natoms])
-        self.c4 = np.zeros([natoms])
-        self.c5 = np.zeros([natoms])
+        self.c1 = self.c2 = self.c3 = self.c4 = self.c5 = np.zeros(self.natoms)
 
         """ Get indices of adsorbate and surface atoms """
 
-        self.C_indices = np.empty(0, dtype=int)
-        self.O_indices = np.empty(0, dtype=int)
-        self.lattice_indices = np.empty(0, dtype=int)
-        self.symbols = atoms.get_chemical_symbols()
+        self.symbols = np.asarray(atoms.get_chemical_symbols(), dtype=str)
 
-        index = 0
-
-        for symbol in self.symbols:
-            if symbol == 'C':
-                self.C_indices = np.append(self.C_indices, index)
-
-            elif symbol == 'O':
-                self.O_indices = np.append(self.O_indices, index)
-
-            elif symbol == 'Pd':
-                self.lattice_indices = np.append(self.lattice_indices, index)
-            index += 1
-
+        self.C_indices = np.flatnonzero(self.symbols == 'C')
+        self.O_indices = np.flatnonzero(self.symbols == 'O')
+        self.lattice_indices = np.flatnonzero(self.symbols == 'Pd')
         self.adsorbate_indices = np.concatenate((self.C_indices, self.O_indices))
 
-        """ Make empty arrays for atom temperatures, atom frictions, electron densities, Wigner-Seitz radii (rs), and adsorbate-lattice atoms distances """
+        """ Make empty arrays for atom temperatures and atom frictions. """
 
-        self.T = np.zeros(natoms)
-        self.friction = np.zeros(natoms)
-        self.density = np.zeros(len(self.adsorbate_indices))
-        self.rs = np.zeros(len(self.adsorbate_indices))
-#        self.distances = np.zeros((len(self.adsorbate_indices), len(self.lattice_indices)))
-        self.density_array = np.zeros((len(self.adsorbate_indices), len(self.lattice_indices)))
+        self.T = np.zeros(self.natoms)
+        self.friction = np.zeros(self.natoms)
 
         """ Set friction for surface atoms immediately since it is constant during the simulation """
 
         np.put(self.friction, self.lattice_indices, lattice_friction)
 
         """ Get atomic masses """
+
         self.mass = atoms.get_masses()
 
         self.fixcm = fixcm  # will the center of mass be held fixed?
@@ -144,71 +116,50 @@ class LangevinLaser(MolecularDynamics):
                   'fix-cm': self.fixcm})
         return d
 
-    def set_temperature(self, temperature):
-        self.temp = temperature
-        self.updatevars()
+    def friction_c(self, rs_c):
+        fric_c = np.where(rs_c > 0., 22.654*rs_c**(2.004)*np.exp(-3.134*rs_c)+2.497*rs_c**(-2.061)*np.exp(0.0793*rs_c), 0.)
+        return fric_c
 
-    def set_friction(self, friction):
-        self.fr = friction
-        self.updatevars()
-
-    def set_timestep(self, timestep):
-        self.dt = timestep
-        self.updatevars()
-
-    def get_density(self, distances):
-
-        under_cutoff_indices = np.where(distances < self.cutoff)
-        above_cutoff_indices = np.where(distances >= self.cutoff)
-        np.put(self.density_array, under_cutoff_indices, self.interpolated_density(distances[under_cutoff_indices]))
-        np.put(self.density_array, above_cutoff_indices, 0.)
-        density = self.density_array.sum(axis=1)
-        return density
-
-    def friction_C(self, rs_C):
-        fric_C = np.where(rs_C > 0., 22.654*rs_C**(2.004)*np.exp(-3.134*rs_C)+2.497*rs_C**(-2.061)*np.exp(0.0793*rs_C), 0.)
-        return fric_C
-
-    def friction_O(self, rs_O):
-        fric_O = np.where(rs_O > 0., 1.36513 * rs_O ** (-1.8284) * np.exp(-0.0820301 * rs_O) + 50.342 * rs_O ** (0.490785) * np.exp(-2.70429 * rs_O), 0.)
-        return fric_O
+    def friction_o(self, rs_o):
+        fric_o = np.where(rs_o > 0., 1.36513 * rs_o ** (-1.8284) * np.exp(-0.0820301 * rs_o) + 50.342 * rs_o ** (0.490785) * np.exp(-2.70429 * rs_o), 0.)
+        return fric_o
 
     def calculate_friction(self):
 
         distances = self.atoms.get_distances_list(self.adsorbate_indices, self.lattice_indices)
-        self.density = self.get_density(distances)
+        masked_distances = np.ma.filled(np.ma.masked_array(distances, mask=(distances > self.cutoff)), np.nan)
+        density = np.nansum(self.interpolated_density(masked_distances), axis=1)
 
-        self.rs = np.where(self.density > 0., (3. / (4. * np.pi * self.density) ) ** (1./3.), 0.)
+        rs = np.where(density > 0., (3. / (4. * np.pi * density) ) ** (1./3.), 0.)
 
-        np.put(self.friction, self.C_indices, self.friction_C(self.rs[self.C_indices]))
-        np.put(self.friction, self.O_indices, self.friction_O(self.rs[self.O_indices]))
+        np.put(self.friction, self.C_indices, self.friction_c(rs[self.C_indices]))
+        np.put(self.friction, self.O_indices, self.friction_o(rs[self.O_indices]))
+
+    def calculate_temperature(self):
+
+        current_time = self.get_time()
+
+        np.put(self.T, self.adsorbate_indices, self.interpolated_el_temp(current_time))
+        np.put(self.T, self.lattice_indices, self.interpolated_ph_temp(current_time))
 
     def updatevars(self):
 
         dt = self.dt
-        masses = self.mass
 
         """Get electronic and phonon temperatures at current time"""
 
-        current_time = self.get_time()
-
-        T_el = self.interpolated_el_temp(current_time)
-        T_ph = self.interpolated_ph_temp(current_time)
-
-        np.put(self.T, self.adsorbate_indices, T_el)
-        np.put(self.T, self.lattice_indices, T_ph)
+        self.calculate_temperature()
 
         """Calculate adsorbate friction at current time"""
 
         self.calculate_friction()
-        fr = self.friction
 
-        sigma = np.sqrt(2. * self.T * fr / masses)
-        self.c1 = (dt / 2. - dt * dt * fr / 8.)
-        self.c2 = (dt * fr / 2 - dt * dt * fr * fr / 8.)
-        self.c3 = (np.sqrt(dt) * sigma / 2. - dt ** 1.5 * fr * sigma / 8.)
+        sigma = np.sqrt(2. * self.T * self.friction / self.mass)
+        self.c1 = (dt / 2. - dt * dt * self.friction / 8.)
+        self.c2 = (dt * self.friction / 2 - dt * dt * self.friction * self.friction / 8.)
+        self.c3 = (np.sqrt(dt) * sigma / 2. - dt ** 1.5 * self.friction * sigma / 8.)
         self.c5 = (dt ** 1.5 * sigma / (2 * np.sqrt(3.)))
-        self.c4 = (fr / 2. * self.c5)
+        self.c4 = (self.friction / 2. * self.c5)
 
         # Works in parallel Asap, #GLOBAL number of atoms:
         self.natoms = self.atoms.get_number_of_atoms()
