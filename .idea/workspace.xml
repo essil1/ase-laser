@@ -12,7 +12,7 @@
     <option name="LAST_RESOLUTION" value="IGNORE" />
   </component>
   <component name="FileEditorManager">
-    <splitter split-orientation="horizontal" split-proportion="0.5944478">
+    <splitter split-orientation="horizontal" split-proportion="0.7990344">
       <split-first>
         <leaf SIDE_TABS_SIZE_LIMIT_KEY="300">
           <file pinned="false" current-in-tab="false">
@@ -27,8 +27,8 @@
           <file pinned="false" current-in-tab="true">
             <entry file="file://$PROJECT_DIR$/md/langevin_laser.py">
               <provider selected="true" editor-type-id="text-editor">
-                <state relative-caret-position="360">
-                  <caret line="159" selection-start-line="159" selection-end-line="159" />
+                <state relative-caret-position="499">
+                  <caret line="196" column="31" selection-start-line="196" selection-start-column="31" selection-end-line="196" selection-end-column="31" />
                   <folding>
                     <element signature="e#37#76#0" expanded="true" />
                   </folding>
@@ -127,9 +127,17 @@
       <find>density</find>
       <find>math</find>
       <find>symbol</find>
+      <find>surface_indices</find>
+      <find>get_distance</find>
+      <find>latiice_indices</find>
+      <find>masses</find>
+      <find>rs</find>
+      <find>self.friction</find>
     </findStrings>
     <replaceStrings>
       <replace />
+      <replace>latiice_indices</replace>
+      <replace>lattice_indices</replace>
     </replaceStrings>
     <dirStrings>
       <dir>$PROJECT_DIR$</dir>
@@ -153,7 +161,7 @@
   </component>
   <component name="ProjectFrameBounds" extendedState="6">
     <option name="y" value="25" />
-    <option name="width" value="1680" />
+    <option name="width" value="840" />
     <option name="height" value="988" />
   </component>
   <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
@@ -427,8 +435,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/md/langevin_laser.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="360">
-          <caret line="159" selection-start-line="159" selection-end-line="159" />
+        <state relative-caret-position="499">
+          <caret line="196" column="31" selection-start-line="196" selection-start-column="31" selection-end-line="196" selection-end-column="31" />
           <folding>
             <element signature="e#37#76#0" expanded="true" />
           </folding>
