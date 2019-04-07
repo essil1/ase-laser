@@ -115,12 +115,14 @@ class LangevinLaser(MolecularDynamics):
 
         self.adsorbate_indices = np.concatenate((self.C_indices, self.O_indices))
 
-        """ Make empty arrays for atom temperatures, frictions, electron densities and rs for the adsorbates """
+        """ Make empty arrays for atom temperatures, atom frictions, electron densities, Wigner-Seitz radii (rs), and adsorbate-lattice atoms distances """
 
         self.T = np.zeros(natoms)
         self.friction = np.zeros(natoms)
         self.density = np.zeros(len(self.adsorbate_indices))
         self.rs = np.zeros(len(self.adsorbate_indices))
+#        self.distances = np.zeros((len(self.adsorbate_indices), len(self.lattice_indices)))
+        self.density_array = np.zeros((len(self.adsorbate_indices), len(self.lattice_indices)))
 
         """ Set friction for surface atoms immediately since it is constant during the simulation """
 
@@ -154,28 +156,32 @@ class LangevinLaser(MolecularDynamics):
         self.dt = timestep
         self.updatevars()
 
-        """ Function that calculates friction of an atom for which self.atoms.index == index"""
+    def get_density(self, distances):
 
-    def fricC(self, rs_C):
-        friction_C = np.where(rs_C > 0., 22.654*rs_C**(2.004)*np.exp(-3.134*rs_C)+2.497*rs_C**(-2.061)*np.exp(0.0793*rs_C), 0.)
-        return friction_C
+        under_cutoff_indices = np.where(distances < self.cutoff)
+        above_cutoff_indices = np.where(distances >= self.cutoff)
+        np.put(self.density_array, under_cutoff_indices, self.interpolated_density(distances[under_cutoff_indices]))
+        np.put(self.density_array, above_cutoff_indices, 0.)
+        density = self.density_array.sum(axis=1)
+        return density
 
-    def fricO(self, rs_O):
-        friction_O = np.where(rs_O > 0., 1.36513 * rs_O ** (-1.8284) * np.exp(-0.0820301 * rs_O) + 50.342 * rs_O ** (0.490785) * np.exp(-2.70429 * rs_O), 0.)
-        return friction_O
+    def friction_C(self, rs_C):
+        fric_C = np.where(rs_C > 0., 22.654*rs_C**(2.004)*np.exp(-3.134*rs_C)+2.497*rs_C**(-2.061)*np.exp(0.0793*rs_C), 0.)
+        return fric_C
+
+    def friction_O(self, rs_O):
+        fric_O = np.where(rs_O > 0., 1.36513 * rs_O ** (-1.8284) * np.exp(-0.0820301 * rs_O) + 50.342 * rs_O ** (0.490785) * np.exp(-2.70429 * rs_O), 0.)
+        return fric_O
 
     def calculate_friction(self):
 
-        for index in self.adsorbate_indices:
-
-            distances = self.atoms.get_distances(index, self.lattice_indices, mic=True)
-            np.put(self.density, index, self.interpolated_density(distances[np.where(distances < self.cutoff)]).sum())
+        distances = self.atoms.get_distances_list(self.adsorbate_indices, self.lattice_indices)
+        self.density = self.get_density(distances)
 
         self.rs = np.where(self.density > 0., (3. / (4. * np.pi * self.density) ) ** (1./3.), 0.)
 
-        np.put(self.friction, self.C_indices, self.fricC(self.rs[self.C_indices]))
-        np.put(self.friction, self.O_indices, self.fricO(self.rs[self.O_indices]))
-
+        np.put(self.friction, self.C_indices, self.friction_C(self.rs[self.C_indices]))
+        np.put(self.friction, self.O_indices, self.friction_O(self.rs[self.O_indices]))
 
     def updatevars(self):
 
