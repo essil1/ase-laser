@@ -1662,6 +1662,33 @@ class Atoms(object):
             return D_len
 
 
+    def get_distances_list(self, indices1, indices2, mic=False, vector=False):
+        """Return distances of list of atoms with a list of atoms.
+
+        Use mic=True to use the Minimum Image Convention.
+        vector=True gives the distance vector (from a to self[indices]).
+        """
+
+        R = self.arrays['positions']
+        p1 = R[indices1]
+        p2 = R[indices2]
+        cell = None
+        pbc = None
+
+        if mic:
+            cell = self._cell
+            pbc = self._pbc
+
+        D, D_len = get_distances(p1, p2, cell=cell, pbc=pbc)
+
+        if vector:
+            D.shape = (-1, 3)
+            return D
+        else:
+            D_len.shape = (len(indices1), len(indices2))
+            return D_len
+
+
     def set_distance(self, a0, a1, distance, fix=0.5, mic=False, mask=None, indices=None, add=False, factor=False):
         """Set the distance between two atoms.
 
