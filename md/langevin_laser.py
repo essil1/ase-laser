@@ -126,8 +126,8 @@ class LangevinLaser(MolecularDynamics):
     def calculate_friction(self):
 
         distances = self.atoms.get_distances_list(self.adsorbate_indices, self.lattice_indices)
-        masked_distances = np.ma.filled(np.ma.masked_array(distances, mask=(distances > self.cutoff)), np.nan)
-        density = np.nansum(self.interpolated_density(masked_distances), axis=1)
+        distances[distances >= self.cutoff] = np.nan
+        density = np.nansum(self.interpolated_density(distances), axis=1)
 
         rs = np.where(density > 0., (3. / (4. * np.pi * density) ) ** (1./3.), 0.)
 
