@@ -64,7 +64,7 @@ class LangevinLaser(MolecularDynamics):
         self.interpolated_el_temp = interpolate.interp1d(temp_t, temp_el, kind='cubic')
         self.interpolated_ph_temp = interpolate.interp1d(temp_t, temp_ph, kind='cubic')
 
-        """ Read from density.txt into 1D arrays, generate interpolated function, and get cutoff"""
+        """ Read from density.txt into 1D arrays, generate interpolated function and get cutoff"""
 
         density_file = np.loadtxt(density)
 
@@ -78,7 +78,6 @@ class LangevinLaser(MolecularDynamics):
         """Make empty arrays for the coefficients """  # find journal reference
 
         self.natoms = atoms.get_number_of_atoms()
-
         self.c1 = self.c2 = self.c3 = self.c4 = self.c5 = np.zeros(self.natoms)
 
         """ Get indices of adsorbate and surface atoms """
