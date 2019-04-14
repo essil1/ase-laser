@@ -104,7 +104,7 @@ class LangevinLaser(MolecularDynamics):
 
         """ Friction conversion factor from a.u. to ase units """
 
-        self.conversion_factor = 0.0267902937/units.fs
+        self.conversion_factor = 41.341373/units.fs
 
         self.fixcm = fixcm  # will the center of mass be held fixed?
         self.communicator = communicator
