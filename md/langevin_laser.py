@@ -121,7 +121,6 @@ class LangevinLaser(MolecularDynamics):
 
     def friction_c(self, rs_c):
         fric_c = np.where(rs_c > 0., (22.654*rs_c**(2.004)*np.exp(-3.134*rs_c)+2.497*rs_c**(-2.061)*np.exp(0.0793*rs_c))*self.conversion_factor, 0.)
-        print(fric_c*units.fs)
         return fric_c
 
     def friction_o(self, rs_o):
