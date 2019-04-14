@@ -102,6 +102,10 @@ class LangevinLaser(MolecularDynamics):
 
         self.mass = atoms.get_masses()
 
+        """ Friction conversion factor from a.u. to ase units """
+
+        self.conversion_factor = 0.2308841971414469
+
         self.fixcm = fixcm  # will the center of mass be held fixed?
         self.communicator = communicator
         self.rng = rng
@@ -116,11 +120,12 @@ class LangevinLaser(MolecularDynamics):
         return d
 
     def friction_c(self, rs_c):
-        fric_c = np.where(rs_c > 0., 22.654*rs_c**(2.004)*np.exp(-3.134*rs_c)+2.497*rs_c**(-2.061)*np.exp(0.0793*rs_c), 0.)
+        fric_c = np.where(rs_c > 0., (22.654*rs_c**(2.004)*np.exp(-3.134*rs_c)+2.497*rs_c**(-2.061)*np.exp(0.0793*rs_c))*self.conversion_factor, 0.)
+        print(fric_c*units.fs)
         return fric_c
 
     def friction_o(self, rs_o):
-        fric_o = np.where(rs_o > 0., 1.36513 * rs_o ** (-1.8284) * np.exp(-0.0820301 * rs_o) + 50.342 * rs_o ** (0.490785) * np.exp(-2.70429 * rs_o), 0.)
+        fric_o = np.where(rs_o > 0., 1.36513 * rs_o ** (-1.8284) * np.exp(-0.0820301 * rs_o) + 50.342 * rs_o ** (0.490785) * np.exp(-2.70429 * rs_o)*self.conversion_factor, 0.)
         return fric_o
 
     def calculate_friction(self):
